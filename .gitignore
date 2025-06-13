@@ -22,9 +22,10 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
-# MLflow artifacts (if using MLflow)
+# MLflow runs, db & artifacts 
 mlruns/
 mlflow.db
+mlartifacts/
 
 # Pytest cache
 .pytest_cache/
@@ -38,3 +39,6 @@ coverage.xml
 build/
 dist/
 *.egg-info/
+
+# Ignore image files
+*.png
