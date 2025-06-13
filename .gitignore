@@ -42,3 +42,8 @@ dist/
 
 # Ignore image files
 *.png
+
+# Terraform
+.terraform/
+*.lock.hcl 
+*.tfstate*
