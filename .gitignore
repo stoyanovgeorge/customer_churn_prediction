@@ -41,9 +41,13 @@ dist/
 *.egg-info/
 
 # Ignore image files
+<<<<<<< HEAD
 *.png
 
 # Terraform
 .terraform/
 *.lock.hcl 
 *.tfstate*
+=======
+*.png
+>>>>>>> 8fe478f1fedbc203f4e43deb13f8c5bc34351c36
