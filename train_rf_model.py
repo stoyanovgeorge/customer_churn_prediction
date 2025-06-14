@@ -2,14 +2,14 @@
 import os
 import sys
 import argparse
+from urllib.parse import urlparse
 
 
 def train_random_forest_classifier(
         dataset, 
         n_estimators, 
         max_depth=None, 
-        max_features="sqrt", 
-        criterion="gini"
+        mlflow_uri="http://localhost:5000"
     ):
     # Move imports inside the function to speed up script startup
     import os
@@ -32,10 +32,8 @@ def train_random_forest_classifier(
     import matplotlib.pyplot as plt
     import seaborn as sns
 
-    customers_dataset = ""
-
-    df = pd.read_csv(customers_dataset)
-    # population_df = pd.read_csv(population_dataset_path)
+    df = pd.read_csv(dataset)
+    # population_df = pd.read_csv(population_dataset)
 
     # Renaming the columns in the main DF, containing the customers data
     df = df.rename(
@@ -203,12 +201,12 @@ def train_random_forest_classifier(
     )
 
         # Set up MLflow
-    mlflow.set_tracking_uri("http://localhost:7000")
+    mlflow.set_tracking_uri(mlflow_uri)
     experiment_name = "RF Churn Prediction"
     mlflow.set_experiment(experiment_name)
 
     run_name = (
-        f"{dataset_name} | Estimators={n_estimators}, Depth={max_depth}, MaxFeatures={max_features}, Criterion={criterion}"
+        f"{dataset_name} | Estimators={n_estimators}, Depth={max_depth}"
     )
 
     with mlflow.start_run(run_name=run_name):
@@ -220,8 +218,6 @@ def train_random_forest_classifier(
             n_estimators=n_estimators,
             max_depth=max_depth,
             random_state=42,
-            max_features=max_features,
-            criterion=criterion
         )
         model.fit(X_train, y_train)
 
@@ -283,7 +279,7 @@ def train_random_forest_classifier(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Train a Random Forest model with MLflow logging.",
+        description="Train a Random Forest classifier and log metrics/artifacts to an MLflow server.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     parser.add_argument(
@@ -291,21 +287,17 @@ if __name__ == "__main__":
         help="Path to the CSV dataset"
     )
     parser.add_argument(
-        "--n-estimators", type=int, default=100,
+        "--n-estimators", type=int, default=100, metavar="N",
         help="Number of trees in the forest"
     )
     parser.add_argument(
-        "--max-depth", type=int, default=None,
+        "--max-depth", type=int, default=None, metavar="DEPTH",
         help="Maximum depth of the trees"
     )
     parser.add_argument(
-        "--max-features", type=str, default="sqrt",
-        help="Number of features to consider"
-    )
-    parser.add_argument(
-        "--criterion", type=str, default="gini",
-        help="Function to measure the quality of a split"
-    )
+        "--mlflow_uri", type=str, default="http://localhost:5000", metavar="URI",
+        help="Specifies the tracking URI where MLflow logs will be recorded"
+    )    
 
     args = parser.parse_args()
 
@@ -320,15 +312,20 @@ if __name__ == "__main__":
         sys.exit(1)
     
     # Check if the dataset file is not empty
-
     if args.dataset.stat().st_size == 0:
         print(f"Error: File is empty: {args.dataset}")
+        sys.exit(1)
+
+    # Check if the provided mflow_uri is valid
+    parsed_uri = urlparse(args.mlflow_uri)
+    if not ((parsed_uri.scheme in ("http", "https") and parsed_uri.netloc) or 
+            (parsed_uri.scheme == "file" and os.path.exists(parsed_uri.path))):
+        print(f"Error: Invalid MLflow tracking URI: '{args.mlflow_uri}'.")
         sys.exit(1)
 
     train_random_forest_classifier(
         dataset=args.dataset,
         n_estimators=args.n_estimators,
         max_depth=args.max_depth,
-        max_features=args.max_features,
-        criterion=args.criterion,
+        mlflow_uri=args.mlflow_uri
     )
