@@ -1,4 +1,4 @@
-# 📊 Customer Churn Prediction with MLflow, Docker, Terraform & FastAPI
+# 📊 Customer Churn Prediction with MLflow, Airflow, Docker, Terraform & FastAPI
 
 This project tackles customer churn prediction using a **Random Forest classifier** on a real-world telecom dataset from [Maven Analytics on Kaggle](https://www.kaggle.com/datasets/shilongzhuang/telecom-customer-churn-by-maven-analytics).
 
@@ -46,7 +46,7 @@ Open the `dev.tfvars` file in your preferred editor and replace all placeholder 
 * and others defined in the `dev.tfvars` file
 
 > [!IMPORTANT] 
-> **Important:** Double-check all values before moving on. Incorrect values may lead to deployment failures or misconfiguration.
+> Double-check all values before moving on. Incorrect values may lead to deployment failures or misconfiguration.
 
 ### 🚀 Terraform Deployment
 
@@ -80,11 +80,36 @@ Additionally, we can also remove the following components to further simplify th
 * Worker queue configuration: relevant only for distributed setups
 * Volumes for Redis logs/data
 * Environment variables related to Celery or Redis, such as:
-  * AIRFLOW__CELERY__BROKER_URL
-  * AIRFLOW__CELERY__RESULT_BACKEND
+  * `AIRFLOW__CELERY__BROKER_URL`
+  * `AIRFLOW__CELERY__RESULT_BACKEND`
 * Ports and healthchecks related to Redis or Flower
 
-You can find the final `docker-compose.yaml` file in the `terraform/` directory. 
+You can find the final docker-compose.yaml file in the terraform/ directory.
+
+Before proceeding, make sure to create the required directory structure for Airflow by running:
+```bash
+mkdir -p terraform/airflow/{dags,logs,config,plugins}
+```
+This command will create the following subdirectories under `terraform/airflow/`:
+```text
+airflow/
+├── config
+├── dags
+├── logs
+└── plugins
+```
+> [!TIP]
+> You can inspect your final Docker Compose configuration by running: `docker compose config`. This command resolves and prints the fully rendered configuration by merging your docker-compose.yaml with the .env file and substituting all environment variables with their actual values.
+
+### Docker Compose Environment Variables
+
+The Docker compose file is accepting multiple environment variables. This is why before proceeding further you need to copy the `.env.template` to `.env` and change the values inside to your liking:
+* `AIRFLOW_PROJ_DIR` - The root directory of your Airflow project.
+* `AIRFLOW_UID` - The user ID (UID) of your local user.
+* `AIRFLOW_IMAGE_NAME` - The Airflow Docker image name [Docker Images](https://hub.docker.com/r/apache/airflow)
+* `_AIRFLOW_WWW_USER_USERNAME` - The Airflow webserver login username.
+* `_AIRFLOW_WWW_USER_PASSWORD` - The Airflow webserver login password.
+* `AIRFLOW_FERNET_KEY` - The secret key used by Airflow to encrypt sensitive data. See below for how to generate it.
 
 #### 🔐 Airflow Fernet Key
 Airflow uses Fernet to encrypt passwords in the connection configuration and the variable configuration. It guarantees that a password encrypted using it cannot be manipulated or read without the key. Fernet is an implementation of symmetric (also known as “secret key”) authenticated cryptography.
