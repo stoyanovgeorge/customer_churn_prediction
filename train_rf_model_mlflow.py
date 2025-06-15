@@ -2,8 +2,40 @@
 import os
 import sys
 import argparse
+from pathlib import Path
 from urllib.parse import urlparse
 
+# Replaces NaN values with user-defined defaults
+def replace_nans(df, col_list, value):
+    """
+    Replace missing values in specified columns of a DataFrame with a given value.
+
+    Parameters:
+        df (pd.DataFrame): The DataFrame to process.
+        col_list (list of str): List of column names to fill NaNs in.
+        value: The value to replace NaNs with.
+
+    Returns:
+        pd.DataFrame: DataFrame with NaNs replaced in the specified columns.
+    """
+    for col in col_list:
+        df[col] = df[col].fillna(value)
+    return df
+
+def get_dataset_name(dataset, small_threshold=1000):
+    """
+    Determine the dataset size category based on the number of rows.
+
+    Args:
+        dataset (pd.DataFrame): The dataset whose size will be evaluated.
+        small_threshold (int, optional): The maximum number of rows for a dataset
+            to be considered 'Small'. Defaults to 1000.
+
+    Returns:
+        str: "Small Dataset" if the dataset has rows less than or equal to the threshold,
+            otherwise "Full Dataset".
+    """
+    return "Small Dataset" if dataset.shape[0] <= small_threshold else "Full Dataset"
 
 def train_random_forest_classifier(
         dataset, 
@@ -13,17 +45,18 @@ def train_random_forest_classifier(
     ):
     # Move imports inside the function to speed up script startup
     import os
+    import pickle
     import pandas as pd
-    import kagglehub as kh
+    # import kagglehub as kh
 
     import mlflow
 
     from sklearn.model_selection import train_test_split
     from sklearn.ensemble import RandomForestClassifier
     from sklearn.metrics import ConfusionMatrixDisplay
-    from sklearn.metrics import accuracy_score, roc_auc_score, classification_report
+    from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, roc_curve, classification_report
 
-    from kagglehub import KaggleDatasetAdapter
+    # from kagglehub import KaggleDatasetAdapter
 
     # Importing the Label Encoder
     from sklearn.preprocessing import LabelEncoder
@@ -33,7 +66,8 @@ def train_random_forest_classifier(
     import seaborn as sns
 
     df = pd.read_csv(dataset)
-    # population_df = pd.read_csv(population_dataset)
+    population_path = "data/zipcode_population.csv"
+    population_df = pd.read_csv(population_path)
 
     # Renaming the columns in the main DF, containing the customers data
     df = df.rename(
@@ -75,22 +109,22 @@ def train_random_forest_classifier(
         "zip_code"
     ])
 
-    # Replaces NaN values with user-defined defaults
-    def replace_nans(df, col_list, value):
-        """
-        Replace missing values in specified columns of a DataFrame with a given value.
+    # # Replaces NaN values with user-defined defaults
+    # def replace_nans(df, col_list, value):
+    #     """
+    #     Replace missing values in specified columns of a DataFrame with a given value.
 
-        Parameters:
-            df (pd.DataFrame): The DataFrame to process.
-            col_list (list of str): List of column names to fill NaNs in.
-            value: The value to replace NaNs with.
+    #     Parameters:
+    #         df (pd.DataFrame): The DataFrame to process.
+    #         col_list (list of str): List of column names to fill NaNs in.
+    #         value: The value to replace NaNs with.
 
-        Returns:
-            pd.DataFrame: DataFrame with NaNs replaced in the specified columns.
-        """
-        for col in col_list:
-            df[col] = df[col].fillna(value)
-        return df
+    #     Returns:
+    #         pd.DataFrame: DataFrame with NaNs replaced in the specified columns.
+    #     """
+    #     for col in col_list:
+    #         df[col] = df[col].fillna(value)
+    #     return df
 
     # Replace NaN values in categorical features with the placeholder "Missing"
     categorical_cols_with_nans = [
@@ -168,34 +202,19 @@ def train_random_forest_classifier(
     categorical_cols = df.select_dtypes(include=["object"]).columns.tolist()
 
     df = pd.get_dummies(df, columns=categorical_cols, drop_first=True)
-
-    def get_dataset_name(dataset, small_threshold=1000):
-        """
-        Determine the dataset size category based on the number of rows.
-
-        Args:
-            dataset (pd.DataFrame): The dataset whose size will be evaluated.
-            small_threshold (int, optional): The maximum number of rows for a dataset
-                to be considered 'Small'. Defaults to 1000.
-
-        Returns:
-            str: "Small Dataset" if the dataset has rows less than or equal to the threshold,
-                otherwise "Full Dataset".
-        """
-        return "Small Dataset" if dataset.shape[0] <= small_threshold else "Full Dataset"
     
-    dataset_name = get_dataset_name(dataset)
+    dataset_name = get_dataset_name(df)
 
     # Convert all int columns to float64 to suppress MLflow Warning
-    for col in dataset.columns:
-        if pd.api.types.is_integer_dtype(dataset[col]):
-            dataset[col] = dataset[col].astype("float64")
+    for col in df.columns:
+        if pd.api.types.is_integer_dtype(df[col]):
+            df[col] = df[col].astype("float64")
 
     # Features and target
-    X = dataset.drop(columns=["customer_status"])
-    y = dataset["customer_status"]
+    X = df.drop(columns=["customer_status"])
+    y = df["customer_status"]
 
-    # Split the dataset
+    # Split into trianing and testing data
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42
     )
@@ -211,7 +230,7 @@ def train_random_forest_classifier(
 
     with mlflow.start_run(run_name=run_name):
         # Enable autologging before training
-        mlflow.autolog()
+        mlflow.sklearn.autolog()
 
         # Train model
         model = RandomForestClassifier(
@@ -220,6 +239,34 @@ def train_random_forest_classifier(
             random_state=42,
         )
         model.fit(X_train, y_train)
+        
+        model_path = "data/model.pkl"
+        pickle.dump(model, open(model_path, 'wb'))
+        mlflow.log_artifact(model_path)
+        
+        # Predictions
+        y_pred = model.predict(X_test)
+        y_proba = model.predict_proba(X_test)
+
+        # Log accuracy
+        accuracy = accuracy_score(y_test, y_pred)
+        mlflow.log_metric("accuracy", accuracy)
+
+        # Log AUC (handle binary or multiclass)
+        if y_proba.shape[1] == 2:
+            auc = roc_auc_score(y_test, y_proba[:, 1])
+        else:
+            auc = roc_auc_score(y_test, y_proba, multi_class="ovr", average="macro")
+        mlflow.log_metric("auc", auc)
+
+        # Log classification report metrics
+        report = classification_report(y_test, y_pred, output_dict=True)
+        for label, metrics in report.items():
+            if isinstance(metrics, dict):
+                for metric_name, value in metrics.items():
+                    mlflow.log_metric(f"{label}_{metric_name}", value)
+            elif isinstance(metrics, float):  # "accuracy"
+                mlflow.log_metric(label, metrics)
 
         # Feature importance plot
         importance = pd.Series(model.feature_importances_, index=X.columns)
@@ -229,8 +276,9 @@ def train_random_forest_classifier(
         sns.barplot(x=importance, y=importance.index)
         plt.title("Feature Importance (Sorted)")
         plt.tight_layout()
-        plt.savefig("feature_importance.png")
-        mlflow.log_artifact("feature_importance.png")
+        feature_importance_path = "data/feature_importance.png"
+        plt.savefig(feature_importance_path)
+        mlflow.log_artifact(feature_importance_path)
         plt.close()
 
         # Confusion matrix plot
@@ -249,12 +297,12 @@ def train_random_forest_classifier(
         )
         plt.title("Confusion Matrix")
         plt.tight_layout()
-        plt.savefig("training_confusion_matrix.png")
-        mlflow.log_artifact("training_confusion_matrix.png")
+        confusion_matrix_path = "data/training_confusion_matrix.png"
+        plt.savefig(confusion_matrix_path)
+        mlflow.log_artifact(confusion_matrix_path)
         plt.close()
 
-    # Return all autologged metrics for comparison    
-    return mlflow.active_run().data.metrics
+    return None
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -266,11 +314,11 @@ if __name__ == "__main__":
         help="Path to the CSV dataset"
     )
     parser.add_argument(
-        "--n-estimators", type=int, default=100, metavar="N",
+        "--n_estimators", type=int, default=100, metavar="N",
         help="Number of trees in the forest"
     )
     parser.add_argument(
-        "--max-depth", type=int, default=None, metavar="DEPTH",
+        "--max_depth", type=int, default=None, metavar="DEPTH",
         help="Maximum depth of the trees"
     )
     parser.add_argument(
@@ -290,8 +338,10 @@ if __name__ == "__main__":
         print(f"Error: Dataset file is not a valid CSV file: {args.dataset}")
         sys.exit(1)
     
+    dataset_path = Path(args.dataset)
     # Check if the dataset file is not empty
-    if args.dataset.stat().st_size == 0:
+    # if args.dataset.stat().st_size == 0:
+    if dataset_path.stat().st_size == 0:    
         print(f"Error: File is empty: {args.dataset}")
         sys.exit(1)
 
@@ -302,7 +352,7 @@ if __name__ == "__main__":
         print(f"Error: Invalid MLflow tracking URI: '{args.mlflow_uri}'.")
         sys.exit(1)
 
-    train_random_forest_classifier(
+    result = train_random_forest_classifier(
         dataset=args.dataset,
         n_estimators=args.n_estimators,
         max_depth=args.max_depth,
