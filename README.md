@@ -37,6 +37,7 @@ We prepare two versions of the dataset:
 * `docker-compose.yaml` - This Docker Compose file sets up a lightweight Airflow environment using the LocalExecutor. It removes Redis, CeleryExecutor, Flower, and other unnecessary services, making it more suitable for local development.
 * `main.tf` - This Terraform file sets up infrastructure for an MLflow tracking server and a Docker registry, enabling experiment tracking and container image storage.
 * `variables.tf` - Terraform file defining input variables for configuration, their types and default values.
+* `fastapi_requirements.txt` - Requirements file listing the dependencies for the FastAPI Docker application.
 * `dev.tfvars` - File defining Terraform variables and overriding their default values specified in `variables.tf`.
 * `app/main.py` - FastAPI application file copied into the Docker container to serve prediction requests.
 
@@ -81,7 +82,50 @@ You’ll be prompted to confirm the changes. Type yes to proceed.
 
 ## 🧪 ML Experiment Tracking with MLflow
 
-You can access the web UI of MLflow by navigating to `http://localhost:{external_mlflow_port}`. I have configured the 
+You can access the MLflow web UI by navigating to `http://localhost:{external_mlflow_port}`. This interface is publicly accessible and does not require authentication.
+
+To log new experiments and runs to MLflow, you can use the `mlflow_logging.py script`. This script automates the training of a Random Forest classification model and logs a wide range of metadata and artifacts to the specified MLflow tracking server. Logged items include:
+
+  * The trained model itself
+  * A feature importance bar chart (vertical layout)
+  * A confusion matrix
+  * Model parameters
+  * Performance metrics (e.g., accuracy)
+
+### CLI Help
+
+The script includes a built-in help message that explains all supported arguments:
+
+```bash
+$ python mlflow_logging.py --help
+usage: mlflow_logging.py [-h] -D FILE [--n_estimators N] 
+                         [--max_depth DEPTH] [--mlflow_uri URI] 
+                         [--min_ssplit N] [--max_feats VALUE]
+
+Train a Random Forest classifier and log metrics/artifacts to an MLflow server.
+
+options:
+  -h, --help          show this help message and exit
+  -D, --dataset FILE  Path to the CSV dataset (default: None)
+  --n_estimators N    Number of trees in the forest (default: 100)
+  --max_depth DEPTH   Maximum depth of the trees (default: None)
+  --min_ssplit N      Defines the minimum number of samples required to split an internal node in a Random Forest. (default: 2)
+  --max_feats VALUE   specifies the number of features to consider when looking for the best split at each node in a Random Forest. (default: sqrt)
+  --mlflow_uri URI    Specifies the tracking URI where MLflow logs will be recorded (default: http://localhost:5000)
+```
+As shown above, all parameters have default values except for `--n_estimators`, which must be explicitly provided.
+
+### Example Usage
+```bash
+python mlflow_logging.py \
+  -D data/data_full.csv \
+  --n_estimators 50 \
+  --max_depth 10 \
+  --min_ssplit 2 \
+  --max_feats "sqrt" \
+  --mlflow_uri https://127.0.0.1:7000
+```
+This command trains a Random Forest model using the provided dataset and logs all relevant information to the specified MLflow server running on port 7000.
 
 ## Docker Compose
 
