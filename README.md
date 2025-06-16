@@ -26,6 +26,20 @@ We prepare two versions of the dataset:
 - `data_sample_1000.csv` – a sample of 1,000 rows
 - `data_full.csv` – the full dataset
 
+### Files Description
+* `churn_prediction.ipynb` - This notebook covers data exploration, visualization, and Random Forest classification using GridSearchCV. 
+* `churn_prediction_mlflow.ipynb` - This notebook skips data exploration and GridSearch training of the Random Forest classifier, focusing instead on logging results and artifacts to MLflow.
+* `mlflow_logging.py` - This is a Python script designed to be run from the terminal. It accepts multiple parameters, trains a Random Forest classifier based on the provided inputs, and logs the training process to an MLflow run— including the confusion matrix and feature importance plot as artifacts.
+* `random_forest_automation.sh` - This is a helper Bash script that automates the execution of `mlflow_logging.py` with predefined parameters, enabling the generation of multiple MLflow runs.
+* `download_dataset.py` - This is a helper Python script that downloads both the full dataset and a sample version containing only 1,000 rows.
+* `download_best_model.py` - This is another helper Python script that connects to MLflow, sorts the runs by accuracy, and downloads the best-performing model to the data/ directory.
+* `Dockerfile` - Dockerfile used to build the FastAPI prediction endpoint and start the server, listening on TCP port 8000.
+* `docker-compose.yaml` - This Docker Compose file sets up a lightweight Airflow environment using the LocalExecutor. It removes Redis, CeleryExecutor, Flower, and other unnecessary services, making it more suitable for local development.
+* `main.tf` - This Terraform file sets up infrastructure for an MLflow tracking server and a Docker registry, enabling experiment tracking and container image storage.
+* `variables.tf` - Terraform file defining input variables for configuration, their types and default values.
+* `dev.tfvars` - File defining Terraform variables and overriding their default values specified in `variables.tf`.
+* `app/main.py` - FastAPI application file copied into the Docker container to serve prediction requests.
+
 ---
 
 ## Terraform Setup
