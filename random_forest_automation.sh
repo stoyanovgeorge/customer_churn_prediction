@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Define parameter values
-N_ESTIMATORS_LIST=(50 100 200)
-MAX_DEPTH_LIST=(None 5 10)
+N_ESTIMATORS_LIST=(50 200)
+MAX_DEPTH_LIST=(None 10)
 MIN_SAMPLES_SPLIT_LIST=(2 4)
 
 

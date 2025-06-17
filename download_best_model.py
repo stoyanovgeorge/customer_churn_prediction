@@ -5,7 +5,7 @@ mlflow.set_tracking_uri("http://127.0.0.1:7000")
 
 EXPERIMENT_NAME = "RF Churn Prediction"
 METRIC = "accuracy"  
-MODEL_DIR = "app/"  # Model export path
+PIPELINE_DIR = "app/"  # Model export path
 
 client = MlflowClient()
 
@@ -31,7 +31,7 @@ run_id = best_run.info.run_id
 local_path = client.download_artifacts(
     run_id=run_id,
     path="pipeline.pkl",
-    dst_path=MODEL_DIR
+    dst_path=PIPELINE_DIR
 )
 
 print(f"The best pipeline of Run ID: {run_id} is saved to: {local_path}")

@@ -114,7 +114,6 @@ def train_random_forest_classifier(
         n_estimators, 
         max_depth=None, 
         min_ssplit=2,
-        max_feats="sqrt",
         mlflow_uri="http://localhost:5000"
     ):
     """
@@ -241,7 +240,6 @@ def train_random_forest_classifier(
             n_estimators=n_estimators,
             max_depth=max_depth,
             random_state=42,
-            max_features=max_feats,
             min_samples_split=min_ssplit,
             n_jobs=-1
         ))
@@ -265,7 +263,7 @@ def train_random_forest_classifier(
     mlflow.set_experiment("RF Churn Prediction")
     
     dataset_name = get_dataset_name(df)
-    run_name = f"{dataset_name} | NE={n_estimators}, MD={max_depth} | MSS={min_ssplit} | MX={max_feats}"
+    run_name = f"{dataset_name} | NE={n_estimators} | MD={max_depth} | MSS={min_ssplit}"
 
     with mlflow.start_run(run_name=run_name):
         mlflow.sklearn.autolog()
@@ -289,13 +287,18 @@ def train_random_forest_classifier(
         # Push the whole pipeline to MLflow
         pipeline_path = "app/pipeline.pkl"
         
+        model_data = {
+            "pipeline": pipeline,
+            "label_encoder": le
+        }
+        
         with open(pipeline_path, "wb") as f:
-            pickle.dump(pipeline, f)
+            pickle.dump(model_data, f)
             
         mlflow.log_artifact(pipeline_path)
         
         # Removing the pipeline from the data/ directory
-        # os.remove(pipeline_path)
+        os.remove(pipeline_path)
         
         # Manually logs the AUC Macro (Generic, works for both binary & multiclass classification)         
         if y_proba.shape[1] == 2:
@@ -308,8 +311,6 @@ def train_random_forest_classifier(
         importances = model.feature_importances_
         feature_names = pipeline[:-1].get_feature_names_out()
         
-        print(feature_names)
-
         # Create DataFrame of the Features
         feat_df = pd.DataFrame({'Feature': feature_names, 'Importance': importances})
 
@@ -371,10 +372,6 @@ if __name__ == "__main__":
         help="Defines the minimum number of samples required to split an internal node in a Random Forest."
     )
     parser.add_argument(
-        "--max_feats", type=str, default="sqrt", metavar="VALUE",
-        help="specifies the number of features to consider when looking for the best split at each node in a Random Forest."
-    )
-    parser.add_argument(
         "--mlflow_uri", type=str, default="http://localhost:5000", metavar="URI",
         help="Specifies the tracking URI where MLflow logs will be recorded"
     )    
@@ -414,7 +411,6 @@ if __name__ == "__main__":
         dataset=args.dataset,
         n_estimators=args.n_estimators,
         max_depth=args.max_depth,
-        max_feats=args.max_feats,
         min_ssplit=args.min_ssplit,
         mlflow_uri=args.mlflow_uri
     )

@@ -10,12 +10,13 @@ import pandas as pd
 from enum import Enum
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 from pydantic import BaseModel, Field
 
 POPULATION_DATASET = "zipcode_population.csv"
 LOG_PATH = "app.log"
 PIPELINE_PATH = "pipeline.pkl"
+logger = structlog.get_logger()
 
 def preprocess_data(df, population_df):
     """
@@ -52,19 +53,18 @@ async def lifespan(app: FastAPI):
     setup_logging()
     
     # Generate sample log entries
-    logger = structlog.get_logger()
     logger.info("Application starting up")
-    for i in range(3):
-        logger.info("Sample log message", message_id=i+1)
-    
-    logger.info("Loading ML model")
     
     # Loading the preprocessor & the model
-    pipeline = joblib.load(PIPELINE_PATH)
+    model_data = joblib.load(PIPELINE_PATH)
+    
+    pipeline = model_data["pipeline"]
+    labels = model_data["label_encoder"].classes_.tolist()
     
     app.state.pipeline = pipeline
     app.state.preprocessor = pipeline.named_steps['preprocessor']
     app.state.model = pipeline.named_steps['classifier']
+    app.state.labels = labels
     
     logger.info("Model loading completed")
     
@@ -116,8 +116,6 @@ def setup_logging():
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     """Middleware to log all incoming requests and their latency"""
-    # Get structlog logger
-    logger = structlog.get_logger()
     
     # Prepare base log data
     log_data: Dict[str, Any] = {
@@ -190,7 +188,7 @@ async def health_check(request: Request):
          response_description="List of structured log entries",
          tags=["Logs"])
 async def get_logs(
-    count: Optional[int] = Query(
+    limit: Optional[int] = Query(
         default=10, 
         gt=0, 
         le=100, 
@@ -202,7 +200,7 @@ async def get_logs(
     Retrieve the most recent application logs in structured JSON format.
     
     Parameters:
-    - **count**: Number of log entries to return (default: 10, max: 100)
+    - **limit**: Number of log entries to return (default: 10, max: 100)
     
     Returns:
     - List of JSON objects representing log entries, newest first
@@ -226,7 +224,7 @@ async def get_logs(
         
         # Iterate from end of file backwards
         for line in reversed(lines):
-            if line_count >= count:
+            if line_count >= limit:
                 break
                 
             stripped_line = line.strip()
@@ -246,7 +244,6 @@ async def get_logs(
     
     except Exception as e:
         # Log error using structlog
-        logger = structlog.get_logger()
         logger.error("Log retrieval failed", error=str(e))
         
         raise HTTPException(
@@ -399,18 +396,22 @@ class PredictionInput(BaseModel):
         }
         
 class PredictionOutput(BaseModel):
-    prediction: int
-    probabilities: List[float]
-    class_labels: List[int]
+    # prediction: int
+    # probabilities: List[float]
+    # class_labels: List[str]
+    prediction: int  # Numeric prediction (e.g., 0, 1, 2)
+    label: str       # Human-readable label (e.g., "Churned")
+    probabilities: List[float]  # Confidence scores for all classes
+    available_classes: Dict[int, str]  # Mapping of all possible classes
 
 @app.post("/api/predictions",
           summary="Make Customers Churn Prediction using Random Forest Classifier",
           response_description="Prediction results",
           tags=["random_forest"])
 async def predict(
-    inputs: List[PredictionInput],
+    inputs: Union[PredictionInput, List[PredictionInput]],  # Accepts both single and multiple inputs
     request: Request
-) -> List[PredictionOutput]:
+) -> Union[PredictionOutput, List[PredictionOutput]]: 
     """
     Make predictions using the trained Random Forest model.
     
@@ -423,17 +424,23 @@ async def predict(
         - probabilities: Class probabilities
         - class_labels: Available class labels
     """
-    logger = structlog.get_logger()
-    logger.info("Prediction request received", 
-                client=request.client.host if request.client else "unknown",
-                num_records=len(inputs))
-    # Load preprocessor & model
-    preprocessor = request.app.state.preprocessor
-    model = request.app.state.model
-    
     try:
-        # Convert input to DataFrame (preserving original case)
-        input_data = [item.model_dump() for item in inputs]
+        # Normalize input to always be a list
+        input_list = [inputs] if isinstance(inputs, PredictionInput) else inputs
+        
+        # Validate input
+        if not input_list:
+            raise HTTPException(status_code=400, detail="No input data provided")
+        
+        # Logging the Prediction Request
+        logger.info("Received prediction request") 
+            
+        # Load preprocessor & model
+        preprocessor = request.app.state.preprocessor
+        model = request.app.state.model
+        labels = request.app.state.labels
+        
+        input_data = [item.model_dump() for item in input_list]
         df = pd.DataFrame(input_data)
         
         # Renaming the column names
@@ -467,37 +474,37 @@ async def predict(
 
         # Preprocess data with population merge
         df = preprocess_data(df, population_df)
-        
-        print(df.columns)
+        print(df)
 
         # Preprocess features
         logger.info("Preprocessing features")
         
         processed_features = preprocessor.transform(df)
         
+        # Predict
+        logger.info("Making predictions", num_samples=processed_features.shape[0])
+        probabilities = model.predict_proba(processed_features)
+        predictions = np.argmax(probabilities, axis=1)
+
+        # Format response   
         # Make predictions
         logger.info("Making predictions")
         probabilities = model.predict_proba(processed_features)
         predictions = np.argmax(probabilities, axis=1)
         
-        # Format response
+        # return results
         results = []
         for i, pred in enumerate(predictions):
-            results.append({
-                "prediction": int(pred),
-                "probabilities": probabilities[i].tolist(),
-                "class_labels": model.classes_.tolist()
-            })
-            
-        logger.info("Prediction completed", 
-                    num_predictions=len(results),
-                    prediction_sample=results[0] if results else None)
+            results.append(PredictionOutput(
+                prediction=int(pred),
+                label=labels[int(pred)],
+                probabilities=probabilities[i].tolist(),
+                available_classes={i: label for i, label in enumerate(labels)}
+            ))
         
-        return results
+        # Return single result if single input was received
+        return results[0] if isinstance(inputs, PredictionInput) else results
     
     except Exception as e:
-        logger.error("Prediction failed", error=str(e))
-        raise HTTPException(
-            status_code=500,
-            detail=f"Prediction error: {str(e)}"
-        )
+        logger.error(f"Prediction failed: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Prediction failed") from e

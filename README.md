@@ -1,233 +1,260 @@
 # 📊 Customer Churn Prediction with MLflow, Airflow, Docker, Terraform & FastAPI
 
-This project tackles customer churn prediction using a **Random Forest classifier** on a real-world telecom dataset from [Maven Analytics on Kaggle](https://www.kaggle.com/datasets/shilongzhuang/telecom-customer-churn-by-maven-analytics).
+A robust end‑to‑end pipeline for **customer churn prediction** using a **Random Forest classifier** on real telecom data from Maven Analytics (Kaggle).
 
 ---
 
 ## 🚀 Project Overview
 
-### ✅ Core Objectives
-- Train models to predict customer churn.
-- Compare results across two dataset sizes using **MLflow**.
-- Package the best model into a **Dockerized FastAPI app**.
-- Manage infrastructure with **Terraform** (local Docker).
-- Orchestrate training with **Airflow**.
-- Basic monitoring of the deployed service.
+### 🎯 Objectives
+- Train and compare churn classifiers on two dataset sizes (sample vs full) using **MLflow**.
+- Package the best-performing model into a **Dockerized FastAPI** service.
+- Orchestrate training jobs using **Airflow**.
+- Provision infrastructure (MLflow tracking server, local Docker registry) with **Terraform**.
+- Enable basic monitoring for the deployed endpoint.
 
 ---
 
 ## 📂 Dataset
 
-- **Source**: [Telecom Customer Churn](https://www.kaggle.com/datasets/shilongzhuang/telecom-customer-churn-by-maven-analytics)
-- **Format**: Tabular CSV
-- **Target variable**: `Customer Status`
-
-We prepare two versions of the dataset:
-- `data_sample_1000.csv` – a sample of 1,000 rows
-- `data_full.csv` – the full dataset
-
-### Files Description
-* `churn_prediction.ipynb` - This notebook covers data exploration, visualization, and Random Forest classification using GridSearchCV. 
-* `churn_prediction_mlflow.ipynb` - This notebook skips data exploration and GridSearch training of the Random Forest classifier, focusing instead on logging results and artifacts to MLflow.
-* `mlflow_logging.py` - This is a Python script designed to be run from the terminal. It accepts multiple parameters, trains a Random Forest classifier based on the provided inputs, and logs the training process to an MLflow run— including the confusion matrix and feature importance plot as artifacts.
-* `random_forest_automation.sh` - This is a helper Bash script that automates the execution of `mlflow_logging.py` with predefined parameters, enabling the generation of multiple MLflow runs.
-* `download_dataset.py` - This is a helper Python script that downloads both the full dataset and a sample version containing only 1,000 rows.
-* `download_best_model.py` - This is another helper Python script that connects to MLflow, sorts the runs by accuracy, and downloads the best-performing model to the data/ directory.
-* `Dockerfile` - Dockerfile used to build the FastAPI prediction endpoint and start the server, listening on TCP port 8000.
-* `docker-compose.yaml` - This Docker Compose file sets up a lightweight Airflow environment using the LocalExecutor. It removes Redis, CeleryExecutor, Flower, and other unnecessary services, making it more suitable for local development.
-* `main.tf` - This Terraform file sets up infrastructure for an MLflow tracking server and a Docker registry, enabling experiment tracking and container image storage.
-* `variables.tf` - Terraform file defining input variables for configuration, their types and default values.
-* `fastapi_requirements.txt` - Requirements file listing the dependencies for the FastAPI Docker application.
-* `dev.tfvars` - File defining Terraform variables and overriding their default values specified in `variables.tf`.
-* `app/main.py` - FastAPI application file copied into the Docker container to serve prediction requests.
+- **Source**: [Maven Analytics – Telecom Customer Churn (CSV)](https://www.kaggle.com/datasets/shilongzhuang/telecom-customer-churn-by-maven-analytics/data)
+- **Target**: `Customer Status`  
+- **Versions**:
+  - `data/data_sample_1000.csv` – 1,000‑row sample  
+  - `data/data_full.csv` – full dataset  
 
 ---
 
-## Terraform Setup
+## 🧩 Project Structure
 
-### 📥 Terraform Installation
+| File                                | Description |
+|-------------------------------------|-------------|
+| `.env.template`                     | Environment file for Docker Compose specifying Airflow configuration parameters. |
+| `airflow-compose.yaml`              | Simple Docker compose file to spin up Airflow with `LocalExecutor`. |
+| `app/main.py`                       | FastAPI app serving `/predict`, `/health`, `/logs`. |
+| `fastapi_requirements.txt`          | Dependencies for the FastAPI container. |
+| `churn_prediction.ipynb`            | Exploratory analysis, visualization, RF + GridSearchCV. |
+| `churn_prediction_mlflow.ipynb`     | Skips exploration: focuses on MLflow logging. |
+| `mlflow_logging.py`                 | CLI script: train RF, log model + metrics + artifacts (confusion matrix, feature importances). |
+| `download_best_model.py`            | Fetches and downloads the top MLflow run model. |
+| `download_dataset.py`               | Downloads sample/full datasets. |
+| `random_forest_automation.sh`       | Batch runner of `mlflow_logging.py` with differing hyperparameters. |
+| `Dockerfile`                        | Builds the FastAPI service on Python 3.13.5‑slim. |
+| `build_docker_image.sh`             | Automates Docker build/tag/push. |
+| `docker-compose.yaml`               | Spins up Airflow (LocalExecutor) + FastAPI service. |
+| `terraform/variables.tf`            | Terraform input variable definitions. |
+| `terraform/dev.tfvars`              | Local override values for variables.tf. |
+| `terraform/main.tf`                 | Provisions Docker network, registry, MLflow server. |
+| `.env.template`                     | Template for Docker Compose environment variables. |
 
-To get started, make sure Terraform is installed on your machine. You can refer to the official Terraform documentation for installation instructions tailored to your operating system: [Terrfaform Installation](https://developer.hashicorp.com/terraform/install)
+---
 
-### 🔧 Terraform Environment Variables
+## 🔧 Infrastructure (Terraform)
 
-Open the `dev.tfvars` file in your preferred editor and replace all placeholder values with actual configuration values. Key variables to update include:
+### Prerequisites
+- Install [Terraform](https://developer.hashicorp.com/terraform/install).
 
-* `mlflow_image` - The version tag of the MLflow Docker image being used
-* `external_mlflow_port` - The host machine’s external port that receives incoming MLflow requests
-* `docker_network_name` - Name of the Docker Network
-* `uid` - User ID
-* `gid` - Group ID
-* and others defined in the `dev.tfvars` file
+### Setup
+1. Edit `terraform/dev.tfvars`, replacing placeholders:
+   - `mlflow_image`, `external_mlflow_port`, `docker_network_name`, `uid`, `gid`, etc.
+2. Deploy:
+   ```bash
+   terraform plan --var-file="dev.tfvars"
+   terraform apply --var-file="dev.tfvars"
+  ```
+This sets up a Docker network, registry (e.g. at 127.0.0.1:5000), and MLflow tracking UI (e.g. at 127.0.0.1:7000).
 
-> [!IMPORTANT] 
-> Double-check all values before moving on. Incorrect values may lead to deployment failures or misconfiguration.
+---
 
-### 🚀 Terraform Deployment
+## 🧪 MLflow Tracking
+Visit MLflow UI at: `http://localhost:<external_mlflow_port>`
 
-Once your `dev.tfvars` is properly configured, you're ready to deploy the infrastructure.
-
-1. Review the plan to see what changes Terraform will make:
-```bash
-terraform plan --var-file="dev.tfvars"
-```
-2. Apply the plan to provision the resources:
-```bash
-terraform apply --var-file="dev.tfvars"
-```
-You’ll be prompted to confirm the changes. Type yes to proceed.
-
-> [!NOTE]
-> This action will start a Docker network, a local Docker registry, and an MLflow tracking server. To access them, refer to the configured values for `external_registry_port` and `external_mlflow_port`.
-
-## 🧪 ML Experiment Tracking with MLflow
-
-You can access the MLflow web UI by navigating to `http://localhost:{external_mlflow_port}`. This interface is publicly accessible and does not require authentication.
-
-To log new experiments and runs to MLflow, you can use the `mlflow_logging.py script`. This script automates the training of a Random Forest classification model and logs a wide range of metadata and artifacts to the specified MLflow tracking server. Logged items include:
-
-  * The trained model itself
-  * A feature importance bar chart (vertical layout)
-  * A confusion matrix
-  * Model parameters
-  * Performance metrics (e.g., accuracy)
-
-### CLI Help
-
-The script includes a built-in help message that explains all supported arguments:
-
-```bash
-$ python mlflow_logging.py --help
-usage: mlflow_logging.py [-h] -D FILE [--n_estimators N] 
-                         [--max_depth DEPTH] [--mlflow_uri URI] 
-                         [--min_ssplit N] [--max_feats VALUE]
-
-Train a Random Forest classifier and log metrics/artifacts to an MLflow server.
-
-options:
-  -h, --help          show this help message and exit
-  -D, --dataset FILE  Path to the CSV dataset (default: None)
-  --n_estimators N    Number of trees in the forest (default: 100)
-  --max_depth DEPTH   Maximum depth of the trees (default: None)
-  --min_ssplit N      Defines the minimum number of samples required to split an internal node in a Random Forest. (default: 2)
-  --max_feats VALUE   specifies the number of features to consider when looking for the best split at each node in a Random Forest. (default: sqrt)
-  --mlflow_uri URI    Specifies the tracking URI where MLflow logs will be recorded (default: http://localhost:5000)
-```
-As shown above, all parameters have default values except for `--n_estimators`, which must be explicitly provided.
-
-### Example Usage
+Use `mlflow_logging.py` to log RF runs:
 ```bash
 python mlflow_logging.py \
   -D data/data_full.csv \
   --n_estimators 50 \
   --max_depth 10 \
   --min_ssplit 2 \
-  --max_feats "sqrt" \
-  --mlflow_uri https://127.0.0.1:7000
+  --mlflow_uri http://localhost:<external_mlflow_port>
 ```
-This command trains a Random Forest model using the provided dataset and logs all relevant information to the specified MLflow server running on port 7000.
+* The script creates a new Experiment named: `RF Churn Prediction` and every execution will create a new Run, that will be of the format: `Full DF | NE=200 | MD=10 | MSS=2`. This translates to:
 
-## Docker Compose
+  * Dataset: Full dataset (`data_full.csv`) used
+  * NE: 200 Random Forest estimators (`n_estimators=200`)
+  * MD: Maximum tree depth set to 10 (`max_depth=10`)
+  * MSS: Minimum samples required to split an internal node is 2 (`min_samples_split=2`)
 
-The `docker-compose.yaml` file defines services for launching an Airflow instance and a FastAPI application. The FastAPI app exposes a single `POST /predict` endpoint, which allows you to use the best model to make classification predictions for the `Customer Status` column.
-
-### Docker Compose Environment Variables
-
-The Docker Compose file relies on multiple environment variables. Before proceeding, copy the `.env.template` file to `.env`:
+* In addition on every run it logs: 
+  * The trained model itself
+  * A feature importance bar chart (vertical layout)
+  * A confusion matrix
+  * Model parameters
+  * Performance metrics (e.g., accuracy)
+* You can also run:
 ```bash
-cp terraform/.env.template terraform/.env
+./random_forest_automation.sh
 ```
-And update the values as needed:
-* `AIRFLOW_PROJ_DIR` - The root directory of your Airflow project.
-* `AIRFLOW_UID` - The user ID (UID) of your local user.
-* `AIRFLOW_IMAGE_NAME` - The Airflow Docker image name [Docker Images](https://hub.docker.com/r/apache/airflow)
-* `_AIRFLOW_WWW_USER_USERNAME` - The Airflow webserver login username.
-* `_AIRFLOW_WWW_USER_PASSWORD` - The Airflow webserver login password.
-* `AIRFLOW_FERNET_KEY` - The secret key used by Airflow to encrypt sensitive data. See below for how to generate it.
+to generate a grid of runs. 
+* To retrieve the best model:
+  * Use MLflow UI to manually download `pipeline.pkl` from the Runs' Artifacts, or
+  * Run:
+  ```bash
+  python download_best_model.py --mlflow_uri http://localhost:<port>
+  ```
+  which fetches the model with the highest training accuracy into `app/pipeline.pkl`.
 
-## 🚀 Airflow DAG (Directed Acyclic Graph)
+---
 
-
-
-### 🔧 Airflow Installation
-
-You can follow the official Airflow installation tutorial using Docker Compose: [How to Install Apache Airflow with Docker Compose](https://airflow.apache.org/docs/apache-airflow/stable/howto/docker-compose/index.html). 
-
-I've simplified the docker-compose.yaml file for local execution. Since we’re running Airflow locally, we can safely switch the executor to LocalExecutor, which doesn’t require a distributed message broker like Redis. As a result, we can remove the Redis service as well as Flower, which is used for monitoring Celery workers — both of which are unnecessary in this setup.
-
-Additionally, we can also remove the following components to further simplify the configuration:
-
-* Celery workers (if present): only needed for CeleryExecutor
-* Worker queue configuration: relevant only for distributed setups
-* Volumes for Redis logs/data
-* Environment variables related to Celery or Redis, such as:
-  * `AIRFLOW__CELERY__BROKER_URL`
-  * `AIRFLOW__CELERY__RESULT_BACKEND`
-* Ports and healthchecks related to Redis or Flower
-
-You can find the final docker-compose.yaml file in the terraform/ directory.
-
-Before proceeding, make sure to create the required directory structure for Airflow by running:
-```bash
-mkdir -p terraform/airflow/{dags,logs,config,plugins,includes}
-```
-This command will create the following subdirectories under `terraform/airflow/`:
-```text
-airflow/
-├── config
-├── dags
-├── logs
-└── plugins
-```
-> [!TIP]
-> You can inspect your final Docker Compose configuration by running: `docker compose config`. This command resolves and prints the fully rendered configuration by merging your docker-compose.yaml with the .env file and substituting all environment variables with their actual values.
-
-#### 🔐 Airflow Fernet Key
-Airflow uses Fernet to encrypt passwords in the connection configuration and the variable configuration. It guarantees that a password encrypted using it cannot be manipulated or read without the key. Fernet is an implementation of symmetric (also known as “secret key”) authenticated cryptography.
-
-You can generate Airflow Fernet key with the following script:
-
-```python
-python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-```
-
-## 🐳 Building and Pushing the Docker Container to Local Registry
-
-This section describes how to build your FastAPI-based Random Forest API prediction endpoint, tag it properly, and push it to your local Docker registry (127.0.0.1:5000).
-
-1. Build the Docker Image
-
-Use the following command to build the Docker image using the `Dockerfile` and assign it a versioned tag (1.0.0):
+## 🐳 Dockerize & Deploy FastAPI Prediction App
+### Build & Push the Model Server
 ```bash
 docker build -t rf-api:1.0.0 .
-```
-This command will:
-* Use the current directory (.) as the build context
-* Create a Docker image named rf-api with the tag 1.0.0
-
-2. Tag the Image for Your Local Registry
-To push the image to your local registry, you need to tag it with the registry address (127.0.0.1:5000):
-```bash
 docker tag rf-api:1.0.0 127.0.0.1:5000/rf-api:1.0.0
-```
-> [!INFO]
-> This step simply creates a new reference to the same image so that Docker knows which registry to push it to.
-
-3. Push the Image to the Local Registry
-Push the tagged image to your local Docker registry:
-```bash
 docker push 127.0.0.1:5000/rf-api:1.0.0
 ```
-If successful, the image will now be available in your local registry and can be deployed by other services via docker run or docker compose.
-
-**Optional**: To confirm the image is available run:
+Or you can use:
 ```bash
-$ curl http://127.0.0.1:5000/v2/_catalog
-{"repositories":["rf-api"]}
+./build_docker_image.sh 1.0.0
 ```
-You should see your repository listed here. 
-To check available tags for the image:
+* Dockerfile:
+  * Based on `python:3.13.5-slim`
+  * Installs dependencies, exposes port 8080.
+  * Runs `uvicorn main:app --host 0.0.0.0 --port 8080`
+* Confirm local registry content:
 ```bash
+curl http://127.0.0.1:5000/v2/_catalog
 curl http://127.0.0.1:5000/v2/rf-api/tags/list
-{"name":"rf-api","tags":["1.0.0"]}
 ```
+### Run the Container
+```bash
+docker run -d --name rf-api \
+  -p 8080:8080 --restart unless-stopped \
+  127.0.0.1:5000/rf-api:1.0.0
+```
+* Alternatively, you can also use the provided `docker-compose.yaml` file to spin up the container. 
+```bash
+docker compose up -d
+```
+> [!TIP]
+> The version tab on your build and in the `docker-compose.yaml` file must match. 
+Check:
+* If the container is running with:
+  ```bash
+  docker ps -a
+  ```
+* The log files:
+  ```bash
+  docker logs rf-api
+  ```
+* Access the shell:
+  ```bash
+  docker exec -it rf-api /bin/sh
+  ```
+
+---
+
+## 🔌 API Endpoints
+
+* `GET /api/health` - Checks if service is running and model is loaded.
+* `GET /api/logs?limit=50` - Returns up to limit recent log entries (default: 100).
+* `POST /api/predictions` - Sends JSON (single object or array), returns:
+```json
+{
+  "prediction": 0,
+  "label": "Churned",
+  "probabilities": [
+    0.6516209691830841,
+    0.07573502309365371,
+    0.27264400772326197
+  ],
+  "available_classes": {
+    "0": "Churned",
+    "1": "Joined",
+    "2": "Stayed"
+  }
+}
+```
+* Explore interactive docs at http://127.0.0.1:8080/docs.
+
+---
+
+## 🧩 Airflow (Local Execution)
+* Standalone `airflow-compose.yaml` launches:
+  * Airflow with `LocalExecutor`
+  * No Redis, Celery, or Flower — only core services activated.
+
+* Before startup, create directories:
+```bash
+mkdir -p terraform/airflow/{dags,logs,config,plugins,scripts}
+```
+* Copy variables:
+```bash
+cp .env.template .env
+```
+and fill in:
+* `AIRFLOW_PROJ_DIR`
+* `AIRFLOW_UID`
+* `AIRFLOW_IMAGE_NAME`
+* `_AIRFLOW_WWW_USER_USERNAME`
+* `_AIRFLOW_WWW_USER_PASSWORD`
+* `AIRFLOW_FERNET_KEY`
+
+> [!IMPORTANT]
+> Airflow uses Fernet to encrypt passwords in the connection configuration and the variable configuration. It guarantees that a password encrypted using it cannot be manipulated or read without the key. Fernet is an implementation of symmetric (also known as “secret key”) authenticated cryptography.
+* You can generate the Airflow Fernet key with the following command:
+```bash
+python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+Once you're satisfied with the Airflow configuration, you can start the Docker containers using the `airflow-compose.yaml` file:
+
+```bash
+docker compose -f airflow-compose.yaml up -d
+```
+
+> [!IMPORTANT]
+> Since the Docker Compose file does not use the default name (`docker-compose.yaml`), you must specify its filename explicitly with the `-f` flag.
+
+---
+
+## 🛠 Troubleshooting & Tips
+* Validate Docker Compose Setup:
+  ```bash
+  docker compose config
+  ```
+* If services restart unexpectedly:
+  * Check logs:
+  ```bash
+  docker logs <containerName>
+  ```
+  * Open Shell to debug
+  ```bash
+  docker exec -it <container> /bin/sh
+  ```
+* Ensure that MLflow and Docker local registry are up and running
+* Ensure that you are not having port collisions when starting new services
+
+---
+
+## 🎯 Summary Workflow
+
+1. Terraform apply → infra up (registry, MLflow)
+2. Download data → run ML experiments → log results → retrieve best model
+3. Build & push FastAPI Docker image
+4. Start services via Docker Compose
+5. Use API endpoints or deploy Airflow orchestration
+
+---
+
+## 📋 References
+* [Maven Analytics – Telecom Customer Churn (CSV)](https://www.kaggle.com/datasets/shilongzhuang/telecom-customer-churn-by-maven-analytics/data)
+* [Running Airflow in Docker](https://airflow.apache.org/docs/apache-airflow/stable/howto/docker-compose/index.html)
+* [MLflow Documentation](https://mlflow.org/docs/latest/)
+* [Random Forest Classifier](https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.RandomForestClassifier.html)
+
+--- 
+
+## ✅ Contributors & License
+
+* Author: Georgi Stoyanov
+* License: MIT
