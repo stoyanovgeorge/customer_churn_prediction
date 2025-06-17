@@ -58,7 +58,7 @@ A robust end‑to‑end pipeline for **customer churn prediction** using a **Ran
 1. Edit `terraform/dev.tfvars`, replacing placeholders:
    - `mlflow_image`, `external_mlflow_port`, `docker_network_name`, `uid`, `gid`, etc.
 2. Deploy:
-   ```bash
+  ```bash
    terraform plan --var-file="dev.tfvars"
    terraform apply --var-file="dev.tfvars"
   ```
@@ -200,7 +200,7 @@ and fill in:
 * `_AIRFLOW_WWW_USER_PASSWORD`
 * `AIRFLOW_FERNET_KEY`
 
-> [!IMPORTANT]
+> [!NOTE]
 > Airflow uses Fernet to encrypt passwords in the connection configuration and the variable configuration. It guarantees that a password encrypted using it cannot be manipulated or read without the key. Fernet is an implementation of symmetric (also known as “secret key”) authenticated cryptography.
 * You can generate the Airflow Fernet key with the following command:
 ```bash
