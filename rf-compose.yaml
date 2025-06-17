@@ -1,0 +1,7 @@
+services:
+  rf-api:
+    image: 127.0.0.1:5000/rf-api:2.0.3
+    container_name: rf-api-container
+    ports:
+      - "8080:8080"
+    restart: unless-stopped

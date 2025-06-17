@@ -5,13 +5,9 @@ WORKDIR /app
 COPY fastapi_requirements.txt .
 RUN pip install --no-cache-dir -r fastapi_requirements.txt
 
-# Copying the model
-COPY app/model.pkl ./app/model.pkl
+# Copy all app files (including main.py, model.pkl, pipeline.pkl)
+COPY ./app .
 
-COPY app/ ./app/
+EXPOSE 8080
 
-WORKDIR /app
-
-EXPOSE 8000
-
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]

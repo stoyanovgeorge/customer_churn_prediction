@@ -1,4 +1,7 @@
+numpy
+joblib
 fastapi
 uvicorn
+structlog
 scikit-learn
-numpy
+category_encoders

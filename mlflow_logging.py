@@ -5,23 +5,6 @@ import argparse
 from pathlib import Path
 from urllib.parse import urlparse
 
-# Replaces NaN values with user-defined defaults
-def replace_nans(df, col_list, value):
-    """
-    Replace missing values in specified columns of a DataFrame with a given value.
-
-    Parameters:
-        df (pd.DataFrame): The DataFrame to process.
-        col_list (list of str): List of column names to fill NaNs in.
-        value: The value to replace NaNs with.
-
-    Returns:
-        pd.DataFrame: DataFrame with NaNs replaced in the specified columns.
-    """
-    for col in col_list:
-        df[col] = df[col].fillna(value)
-    return df
-
 def get_dataset_name(dataset, small_threshold=1000):
     """
     Determine the dataset size category based on the number of rows.
@@ -37,23 +20,6 @@ def get_dataset_name(dataset, small_threshold=1000):
     """
     return "Small DF" if dataset.shape[0] <= small_threshold else "Full DF"
 
-
-def frequency_encode_city(df):
-    """
-    Perform frequency encoding on the 'city' column of a DataFrame.
-
-    This function calculates the frequency of each unique city in the 'city' column,
-    then creates a new column 'city_encoded' where each city is replaced by its frequency count.
-
-    Parameters:
-        df (pandas.DataFrame): Input DataFrame containing a 'city' column.
-
-    Returns:
-        pandas.DataFrame: A new DataFrame with an added 'city_encoded' column representing
-                          the frequency encoding of the 'city' column.
-    """
-    city_freq = df["city"].value_counts()
-    return df.assign(city_encoded=df["city"].map(city_freq))
 
 def preprocess_data(df, population_df):
     """
@@ -83,6 +49,26 @@ def preprocess_data(df, population_df):
     ])
     
     return df
+
+def parse_max_depth(value):
+    """Custom type function for argument parser to handle max_depth.
+    
+    Converts:
+    - 0 → None (unlimited depth)
+    - Positive integers → integer
+    - None/"None" → None
+    """
+    if value is None or str(value).strip().lower() == "none":
+        return None
+    try:
+        depth = int(value)
+        if depth < 0:
+            raise argparse.ArgumentTypeError("max_depth must be non-negative")
+        return None if depth == 0 else depth
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"Invalid max_depth: '{value}'. Must be integer >=0 or None"
+        )
 
 def validate_mlflow_uri(uri):
     """Validates and normalizes an MLflow tracking URI.
@@ -123,7 +109,6 @@ def validate_mlflow_uri(uri):
     
     return uri.rstrip('/')
 
-
 def train_random_forest_classifier(
         dataset, 
         n_estimators, 
@@ -132,38 +117,52 @@ def train_random_forest_classifier(
         max_feats="sqrt",
         mlflow_uri="http://localhost:5000"
     ):
+    """
+    Cleans the input dataset, trains a Random Forest classifier using the specified 
+    hyperparameters, and logs the model, parameters, and artifacts to an MLflow server.
+
+    The function performs the following steps:
+    - Loads and preprocesses the dataset.
+    - Trains a Random Forest classifier within a pipeline.
+    - Logs hyperparameters, metrics, and the trained pipeline to the specified MLflow tracking URI.
+
+    Parameters:
+        dataset (str or Path): Path to the input CSV dataset.
+        n_estimators (int): Number of trees in the Random Forest.
+        max_depth (int, optional): Maximum depth of each tree. Defaults to None.
+        min_ssplit (int): Minimum number of samples required to split an internal node.
+        max_feats (str or int or float): Number of features to consider when looking for the best split.
+        mlflow_uri (str): URI of the MLflow tracking server. Defaults to "http://localhost:5000".
+
+    Returns:
+        Trained pipeline (sklearn.pipeline.Pipeline): The full pipeline including preprocessing and the classifier.
+    """
     # Move imports inside the function to speed up script startup
+    import mlflow
+    import pickle
+    import warnings
     import pandas as pd
-    import numpy as np
+    import seaborn as sns
+    import matplotlib.pyplot as plt
     from sklearn.compose import ColumnTransformer
     from sklearn.pipeline import Pipeline
     from sklearn.impute import SimpleImputer
     from sklearn.preprocessing import (
         OneHotEncoder,
-        FunctionTransformer,
-        LabelEncoder
+        LabelEncoder,
+        OrdinalEncoder
+    )
+    from sklearn.metrics import (
+        classification_report, 
+        recall_score, 
+        precision_score, 
+        f1_score, 
+        roc_auc_score,
+        accuracy_score,
+        ConfusionMatrixDisplay
     )
     from sklearn.ensemble import RandomForestClassifier
     from sklearn.model_selection import train_test_split
-    from sklearn.metrics import (
-        accuracy_score,
-        roc_auc_score,
-        classification_report,
-        ConfusionMatrixDisplay
-    )
-    import mlflow
-    import pickle
-    import matplotlib.pyplot as plt
-    import seaborn as sns
-
-    # from kagglehub import KaggleDatasetAdapter
-
-    # Importing the Label Encoder
-    from sklearn.preprocessing import LabelEncoder
-
-    # Importing Plotting Libraries
-    import matplotlib.pyplot as plt
-    import seaborn as sns
 
     # Load the Customer's Churn & Population Dataset
     df = pd.read_csv(dataset)
@@ -181,7 +180,7 @@ def train_random_forest_classifier(
         lambda x: x.lower().strip().replace(' ', '_'),
         axis="columns"
     )
-
+    
     # Dropping unneeded columns 
     df = preprocess_data(df, population_df)
 
@@ -211,9 +210,7 @@ def train_random_forest_classifier(
     # Create preprocessing pipelines
     binary_transformer = Pipeline(steps=[
         ('imputer', SimpleImputer(strategy='constant', fill_value="No")),
-        ('encoder', FunctionTransformer(
-            lambda x: LabelEncoder().fit_transform(x.astype(str))
-        ))
+        ('encoder', OrdinalEncoder())
     ])
 
     categorical_transformer = Pipeline(steps=[
@@ -223,25 +220,20 @@ def train_random_forest_classifier(
     
     numerical_transformer = Pipeline(steps=[
         ('imputer', SimpleImputer(strategy='constant', fill_value=0)),
-        # Removed StandardScaler since Random Forest doesn't need it
     ])
-    
-    city_transformer = Pipeline(steps=[
-        ('encoder', FunctionTransformer(frequency_encode_city)),
-        ('selector', FunctionTransformer(lambda x: x[["city_encoded"]]))
-    ])
-    
-    # ColumnTransformer for all features
+        
+    from category_encoders import CountEncoder
     preprocessor = ColumnTransformer(
-        transformers=[
-            ('binary', binary_transformer, binary_cols),
-            ('cat', categorical_transformer, categorical_cols),
-            ('num', numerical_transformer, numerical_cols),
-            ('city', city_transformer, ['city'])
-        ],
-        remainder='drop'
+    transformers=[
+        ('binary', binary_transformer, binary_cols),
+        ('cat', categorical_transformer, categorical_cols),
+        ('num', numerical_transformer, numerical_cols),
+        ('count_enc', CountEncoder(normalize=False), ['city']) 
+    ],
+    remainder='drop',
+    verbose_feature_names_out=False
     )
-    
+
     # Full pipeline
     pipeline = Pipeline(steps=[
         ('preprocessor', preprocessor),
@@ -257,17 +249,23 @@ def train_random_forest_classifier(
     
     # Prepare data
     X = df.drop(columns=["customer_status"])
-    y = LabelEncoder().fit_transform(df["customer_status"])
+    le = LabelEncoder()
+    y = le.fit_transform(df["customer_status"])
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42
     )
     
+    # Suppressing the warning about missing values in MLflow
+    # Reference: https://www.mlflow.org/docs/latest/models.html#handling-integers-with-missing-values
+    warnings.filterwarnings("ignore", category=UserWarning, message=".*Integer columns in Python cannot represent missing values.*")
+
+        
     # MLflow setup
     mlflow.set_tracking_uri(mlflow_uri)
     mlflow.set_experiment("RF Churn Prediction")
     
     dataset_name = get_dataset_name(df)
-    run_name = f"{dataset_name} | NE={n_estimators}, MD={max_depth}"
+    run_name = f"{dataset_name} | NE={n_estimators}, MD={max_depth} | MSS={min_ssplit} | MX={max_feats}"
 
     with mlflow.start_run(run_name=run_name):
         mlflow.sklearn.autolog()
@@ -275,14 +273,29 @@ def train_random_forest_classifier(
         # Train model
         pipeline.fit(X_train, y_train)
         
-        # Save model
-        with open("data/model.pkl", "wb") as f:
-            pickle.dump(pipeline, f)
-        mlflow.log_artifact("data/model.pkl")
-        
         # Evaluate
         y_pred = pipeline.predict(X_test)
         y_proba = pipeline.predict_proba(X_test)
+        
+        test_accuracy = accuracy_score(y_test, y_pred)
+        test_recall = recall_score(y_test, y_pred, average="weighted")  # Use "binary" for binary
+        test_precision = precision_score(y_test, y_pred, average="weighted")
+        test_f1 = f1_score(y_test, y_pred, average="weighted")
+        mlflow.log_metric("test_accuracy", test_accuracy)
+        mlflow.log_metric("test_recall", test_recall)
+        mlflow.log_metric("test_precision", test_precision)
+        mlflow.log_metric("test_f1", test_f1)
+        
+        # Push the whole pipeline to MLflow
+        pipeline_path = "app/pipeline.pkl"
+        
+        with open(pipeline_path, "wb") as f:
+            pickle.dump(pipeline, f)
+            
+        mlflow.log_artifact(pipeline_path)
+        
+        # Removing the pipeline from the data/ directory
+        # os.remove(pipeline_path)
         
         # Manually logs the AUC Macro (Generic, works for both binary & multiclass classification)         
         if y_proba.shape[1] == 2:
@@ -291,43 +304,48 @@ def train_random_forest_classifier(
             auc = roc_auc_score(y_test, y_proba, multi_class="ovr", average="macro")
         mlflow.log_metric("auc", auc)
         
-        # Feature importance plot
-        feature_names = (
-            binary_cols + 
-            list(pipeline.named_steps['preprocessor']
-                .named_transformers_['cat']
-                .named_steps['onehot']
-                .get_feature_names_out(categorical_cols)) +
-            numerical_cols +
-            ['city_encoded']
-        )
+        model = pipeline.named_steps['classifier']
+        importances = model.feature_importances_
+        feature_names = pipeline[:-1].get_feature_names_out()
         
-        importance = pd.Series(
-            pipeline.named_steps['classifier'].feature_importances_,
-            index=feature_names
-        ).sort_values(ascending=False)
+        print(feature_names)
+
+        # Create DataFrame of the Features
+        feat_df = pd.DataFrame({'Feature': feature_names, 'Importance': importances})
+
+        # Clean up and Beautify the feature names
+        feat_df['Feature'] = (feat_df['Feature']
+                            .str.replace('remainder__', '')  # Remove remainder prefix
+                            .str.replace('_', ' ')  # Replace underscores with spaces
+                            .str.replace("offer", "", 1) # Replace the first occurence of the word
+                            .str.strip()  # Remove any leading/trailing whitespace
+                            .str.title()  # Capitalize first letter of each word
+                            )
+
+        # Sort the features in descending order
+        feat_df = feat_df.sort_values(by='Importance', ascending=False)
         
-        plt.figure(figsize=(10, 6))
-        sns.barplot(x=importance, y=importance.index)
-        plt.title("Feature Importance (Sorted)")
+        # Plot
+        plt.figure(figsize=(11,6))
+        sns.barplot(data=feat_df, x='Importance', y='Feature')
+        plt.title("Feature Importances (Sorted)")
         plt.tight_layout()
-        plt.savefig("data/feature_importance.png")
-        mlflow.log_artifact("data/feature_importance.png")
-        plt.close()
+        plt.savefig("data/features_imporance.png")
+        mlflow.log_artifact("data/features_imporance.png")       
         
         # Confusion matrix
-        ConfusionMatrixDisplay.from_estimator(
-            pipeline,
-            X_test,
-            y_test,
-            display_labels=["Churned", "Joined", "Stayed"],
-            cmap='Blues'
-        )
-        plt.title("Confusion Matrix")
-        plt.tight_layout()
-        plt.savefig("data/confusion_matrix.png")
-        mlflow.log_artifact("data/confusion_matrix.png")
-        plt.close()
+        # ConfusionMatrixDisplay.from_estimator(
+        #     pipeline,
+        #     X_test,
+        #     y_test,
+        #     display_labels=["Churned", "Joined", "Stayed"],
+        #     cmap='Blues'
+        # )
+        # plt.title("Confusion Matrix")
+        # plt.tight_layout()
+        # plt.savefig("data/testing_confusion_matrix_labeled.png")
+        # mlflow.log_artifact("data/testing_confusion_matrix_labeled.png")
+        # plt.close()
         
     return None
 
@@ -345,7 +363,7 @@ if __name__ == "__main__":
         help="Number of trees in the forest"
     )
     parser.add_argument(
-        "--max_depth", type=int, default=None, metavar="DEPTH",
+        "--max_depth", type=parse_max_depth, default=None, metavar="DEPTH",
         help="Maximum depth of the trees"
     )
     parser.add_argument(
@@ -379,7 +397,7 @@ if __name__ == "__main__":
     if dataset_path.stat().st_size == 0:    
         print(f"Error: File is empty: {args.dataset}")
         sys.exit(1)
-
+        
     # Check if the provided mflow_uri is valid
     mlflow_uri = args.mlflow_uri
     validate_mlflow_uri(mlflow_uri)
@@ -396,5 +414,7 @@ if __name__ == "__main__":
         dataset=args.dataset,
         n_estimators=args.n_estimators,
         max_depth=args.max_depth,
+        max_feats=args.max_feats,
+        min_ssplit=args.min_ssplit,
         mlflow_uri=args.mlflow_uri
     )
